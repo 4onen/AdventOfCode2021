@@ -1,5 +1,6 @@
 use minimax::minimax;
 use std::collections::HashMap;
+use std::str::FromStr;
 
 type Rule = ((char, char), char);
 
@@ -30,38 +31,63 @@ fn to_rule(s: &str) -> Result<Rule, String> {
 
 type Ruleset = HashMap<(char, char), char>;
 
-fn step_polymer(polymer: &str, rules: &Ruleset) -> String {
-    [polymer.chars().next().unwrap()]
-        .into_iter()
-        .chain(
-            polymer
-                .chars()
-                .zip(polymer.chars().skip(1))
-                .flat_map(|(a, b)| {
-                    if rules.contains_key(&(a, b)) {
-                        [rules[&(a, b)], b].into_iter()
-                    } else {
-                        panic!("No rule for {} {} -> ?", a, b);
-                    }
-                }),
-        )
-        .collect()
+#[derive(Debug, Clone)]
+struct Polymer {
+    pairs: HashMap<(char, char), usize>,
+    first: char,
 }
 
-fn run_polymer(polymer: &str, rules: &Ruleset, steps: u8) -> String {
-    (0..steps).fold(polymer.to_string(), |polymer, i| {
-        if i < 7 {
-            println!("{}\t: {}", i, polymer);
+impl FromStr for Polymer {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut pairs = HashMap::new();
+
+        if let Some(first) = s.chars().next() {
+            s.chars().zip(s.chars().skip(1)).for_each(|c| {
+                pairs.entry(c).and_modify(|e| *e += 1).or_insert(1);
+            });
+
+            Ok(Polymer { pairs, first })
+        } else {
+            Err("No characters in polymer string.".to_string())
         }
-        step_polymer(&polymer, rules)
-    })
+    }
 }
 
-fn score_polymer(polymer: String) -> usize {
-    let mut cnts = HashMap::new();
-    for c in polymer.chars() {
-        cnts.entry(c).and_modify(|e| *e += 1).or_insert(1);
+fn step_polymer(polymer: &Polymer, rules: &Ruleset) -> Result<Polymer, String> {
+    let mut pairs = HashMap::new();
+
+    for (&(left, right), &count) in &polymer.pairs {
+        if let Some(&result) = rules.get(&(left, right)) {
+            pairs
+                .entry((left, result))
+                .and_modify(|e| *e += count)
+                .or_insert(count);
+            pairs
+                .entry((result, right))
+                .and_modify(|e| *e += count)
+                .or_insert(count);
+        } else {
+            return Err(format!("Ruleset does not contain key: {:?}", (left, right)));
+        }
     }
+
+    let first = polymer.first;
+
+    Ok(Polymer { pairs, first })
+}
+
+fn score_polymer(polymer: Polymer) -> usize {
+    let mut cnts = HashMap::new();
+
+    for ((_l, r), &cnt) in polymer.pairs.iter() {
+        cnts.entry(r).and_modify(|e| *e += cnt).or_insert(cnt);
+    }
+
+    cnts.entry(&polymer.first)
+        .and_modify(|e| *e += 1)
+        .or_insert(1);
 
     if let Some((min, max)) = minimax(cnts.values()) {
         max - min
@@ -70,15 +96,21 @@ fn score_polymer(polymer: String) -> usize {
     }
 }
 
-fn part1(polymer: &str, rules: &Ruleset) -> usize {
-    score_polymer(run_polymer(polymer, rules, 10))
+fn part1(polymer: Polymer, rules: &Ruleset) -> Result<usize, String> {
+    Ok(score_polymer(
+        (0..10).try_fold(polymer, |p, _| step_polymer(&p, rules))?,
+    ))
 }
 
 // 3306 correct
 
-fn part2(polymer: &str, rules: &Ruleset) -> usize {
-    score_polymer(run_polymer(polymer, rules, 40))
+fn part2(polymer: Polymer, rules: &Ruleset) -> Result<usize, String> {
+    Ok(score_polymer(
+        (0..40).try_fold(polymer, |p, _| step_polymer(&p, rules))?,
+    ))
 }
+
+// 3760312702877 correct
 
 fn main() {
     // Get the command line args
@@ -94,7 +126,8 @@ fn main() {
         let polymer_input = lines
             .next()
             .expect("No polymer input provided.")
-            .to_string();
+            .parse::<Polymer>()
+            .expect(format!("Failed to parse polymer input: \"{}\"", input).as_str());
         let rules = lines
             .skip(1)
             .map(to_rule)
@@ -103,6 +136,6 @@ fn main() {
         (polymer_input, rules)
     };
 
-    println!("Part 1: {}", part1(&polymer_input, &rules));
-    println!("Part 2: {}", part2(&polymer_input, &rules));
+    println!("Part 1: {:?}", part1(polymer_input.clone(), &rules));
+    println!("Part 2: {:?}", part2(polymer_input, &rules));
 }

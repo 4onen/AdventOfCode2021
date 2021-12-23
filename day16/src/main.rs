@@ -83,6 +83,41 @@ impl FromStr for Packet {
     }
 }
 
+impl Packet {
+    fn value(&self) -> usize {
+        match self.content {
+            PacketContent::Literal(value) => value,
+            PacketContent::Operator(0, ref subpackets) => {
+                subpackets.iter().map(Packet::value).sum()
+            }
+            PacketContent::Operator(1, ref subpackets) => {
+                subpackets.iter().map(Packet::value).product()
+            }
+            PacketContent::Operator(2, ref subpackets) => {
+                subpackets.iter().map(Packet::value).min().unwrap_or(0)
+            }
+            PacketContent::Operator(3, ref subpackets) => {
+                subpackets.iter().map(Packet::value).max().unwrap_or(0)
+            }
+            PacketContent::Operator(5, ref subpackets) => {
+                assert!(subpackets.len() == 2);
+                (subpackets[0].value() > subpackets[1].value()) as usize
+            }
+            PacketContent::Operator(6, ref subpackets) => {
+                assert!(subpackets.len() == 2);
+                (subpackets[0].value() < subpackets[1].value()) as usize
+            }
+            PacketContent::Operator(7, ref subpackets) => {
+                assert!(subpackets.len() == 2);
+                (subpackets[0].value() == subpackets[1].value()) as usize
+            }
+            PacketContent::Operator(unknown_type, ref _subpackets) => {
+                panic!("Unsupported operator packet type: {}", unknown_type);
+            }
+        }
+    }
+}
+
 fn part1(p: &Packet) -> usize {
     match &p.content {
         PacketContent::Literal(_) => p.version as usize,
@@ -92,14 +127,30 @@ fn part1(p: &Packet) -> usize {
     }
 }
 
-fn main() {
-    // Get filename from command line
-    let filename: String = std::env::args().nth(1).expect("No filename provided.");
-    // Read file
-    let file: Packet = std::fs::read_to_string(filename)
-        .expect("Could not read file.")
-        .parse()
-        .expect("Could not parse file.");
+// 1012 correct
 
-    println!("Part 1: {}", part1(&file));
+fn part2(p: &Packet) -> usize {
+    p.value()
+}
+
+// 2223947372407 correct
+
+fn main() {
+    let args = std::env::args().collect::<Vec<_>>();
+    if args.len() < 2 {
+        eprintln!("Usage: {} <input> or {} --code <hex>", args[0], args[0]);
+        std::process::exit(1);
+    }
+    // Read file
+    let packet: Packet = if args.len() == 2 {
+        std::fs::read_to_string(&args[1])
+            .expect("Could not read file.")
+            .parse()
+            .expect("Could not parse packet.")
+    } else {
+        args[2].parse().expect("Could not parse packet.")
+    };
+
+    println!("Part 1: {}", part1(&packet));
+    println!("Part 2: {}", part2(&packet));
 }

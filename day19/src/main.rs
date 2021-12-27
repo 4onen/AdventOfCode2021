@@ -317,11 +317,9 @@ fn main() {
 }
 
 mod tests {
-    use super::*;
-
     #[test]
     fn test_samescanner_overlaps() {
-        let input = read_scanners(
+        let input = super::read_scanners(
             "--- scanner 0 ---
 -1,-1,1
 -2,-2,2
@@ -362,16 +360,16 @@ mod tests {
 -6,-4,-5
 0,7,-8",
         );
-        let (scanner, _orientations) = normalize_scanners(6, &input);
+        let (scanner, _orientations) = super::normalize_scanners(6, &input);
         assert_eq!(
             scanner,
-            HashSet::from_iter(vec![
-                Point3D::new(-1, -1, 1),
-                Point3D::new(-2, -2, 2),
-                Point3D::new(-3, -3, 3),
-                Point3D::new(-2, -3, 1),
-                Point3D::new(5, 6, -4),
-                Point3D::new(8, 0, 7),
+            std::collections::HashSet::from_iter(vec![
+                super::Point3D::new(-1, -1, 1),
+                super::Point3D::new(-2, -2, 2),
+                super::Point3D::new(-3, -3, 3),
+                super::Point3D::new(-2, -3, 1),
+                super::Point3D::new(5, 6, -4),
+                super::Point3D::new(8, 0, 7),
             ])
         );
     }

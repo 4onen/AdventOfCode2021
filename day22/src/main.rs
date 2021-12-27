@@ -1,15 +1,13 @@
-use std::{collections::HashSet, str::FromStr};
+use std::str::FromStr;
 
-type Cube = [i32; 3];
 type CoordRange = [i32; 2];
-type Coll = HashSet<Cube>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 struct Instruction {
     state: bool,
-    xs: [i32; 2],
-    ys: [i32; 2],
-    zs: [i32; 2],
+    xs: CoordRange,
+    ys: CoordRange,
+    zs: CoordRange,
 }
 
 impl FromStr for Instruction {
@@ -54,28 +52,66 @@ impl FromStr for Instruction {
     }
 }
 
-fn part1(instructions: &[Instruction]) -> usize {
-    let mut coll = Coll::new();
-    for instruction in instructions {
+impl Instruction {
+    fn intersect(&self, other: &Self) -> Option<Instruction> {
+        let min_x = self.xs[0].max(other.xs[0]);
+        let max_x = self.xs[1].min(other.xs[1]);
+        let min_y = self.ys[0].max(other.ys[0]);
+        let max_y = self.ys[1].min(other.ys[1]);
+        let min_z = self.zs[0].max(other.zs[0]);
+        let max_z = self.zs[1].min(other.zs[1]);
+
+        if min_x > max_x || min_y > max_y || min_z > max_z {
+            None
+        } else {
+            Some(Instruction {
+                state: !self.state,
+                xs: [min_x, max_x],
+                ys: [min_y, max_y],
+                zs: [min_z, max_z],
+            })
+        }
+    }
+}
+
+impl From<Instruction> for i64 {
+    fn from(instruction: Instruction) -> Self {
         let [x0, x1] = instruction.xs;
         let [y0, y1] = instruction.ys;
         let [z0, z1] = instruction.zs;
+        assert!(x0 <= x1);
+        assert!(y0 <= y1);
+        assert!(z0 <= z1);
+        let neg = if instruction.state { 1 } else { -1 };
+        neg * (x1 - x0 + 1) as i64 * (y1 - y0 + 1) as i64 * (z1 - z0 + 1) as i64
+    }
+}
 
-        if instruction.state {
-            coll.extend((x0..=x1).into_iter().flat_map(|x| {
-                (y0..=y1).flat_map(move |y| (z0..=z1).map(move |z: i32| -> Cube { [x, y, z] }))
-            }));
-        } else {
-            for x in x0..=x1 {
-                for y in y0..=y1 {
-                    for z in z0..=z1 {
-                        coll.remove(&[x, y, z]);
-                    }
-                }
+fn gen_overlapped_instrs(instructions: &[Instruction]) -> Vec<Instruction> {
+    let mut cubes: Vec<Instruction> = Vec::new();
+    let mut merge: Vec<Instruction> = Vec::new();
+    for instr in instructions {
+        if instr.state {
+            merge.push(*instr);
+        }
+        for c in cubes.iter() {
+            if let Some(new) = c.intersect(instr) {
+                merge.push(new);
             }
         }
+        cubes.extend(merge.drain(..));
     }
-    coll.len()
+    cubes
+}
+
+fn part1(instructions: &[Instruction]) -> i64 {
+    let overlapped_instrs = gen_overlapped_instrs(instructions);
+    overlapped_instrs.into_iter().map(i64::from).sum()
+}
+
+fn part2(instructions: &[Instruction]) -> i64 {
+    let overlapped_instrs = gen_overlapped_instrs(instructions);
+    overlapped_instrs.into_iter().map(i64::from).sum()
 }
 
 fn main() {
@@ -90,4 +126,5 @@ fn main() {
         .expect("Failed to parse file");
 
     println!("Part1: {}", part1(&input[..20]));
+    println!("Part2: {}", part2(&input));
 }

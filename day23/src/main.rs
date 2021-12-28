@@ -21,27 +21,33 @@ fn cost_per_step(mover: Amphipod) -> CostPerStep {
 //          |1|1|1|1|
 //          0-1-2-3-|
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct RoomState {
-    rooms: [[u8; 2]; 4],
+struct RoomState<const N: usize> {
+    rooms: [[u8; N]; 4],
     hall: [u8; 7],
 }
 
-const fn new_state(rooms: [[u8; 2]; 4]) -> RoomState {
-    RoomState {
+const fn new_state<const N: usize>(rooms: [[u8; N]; 4]) -> RoomState<N> {
+    RoomState::<N> {
         rooms: rooms,
         hall: [0; 7],
     }
 }
 
-const GOAL: RoomState = new_state([[b'A'; 2], [b'B'; 2], [b'C'; 2], [b'D'; 2]]);
+const GOAL_1: RoomState<2> = new_state([[b'A'; 2], [b'B'; 2], [b'C'; 2], [b'D'; 2]]);
+const GOAL_2: RoomState<4> = new_state([[b'A'; 4], [b'B'; 4], [b'C'; 4], [b'D'; 4]]);
 
-impl RoomState {
-    fn room_to_entrance(&self, room_idx: usize) -> Option<(Steps, Amphipod, RoomState)> {
+impl<const N: usize> RoomState<N> {
+    fn room_to_entrance(
+        &self,
+        room_idx: usize,
+        room_to_room: bool,
+    ) -> Option<(Steps, Amphipod, RoomState<N>)> {
         let room = self.rooms[room_idx];
         let from = room.iter().position(|&x| x != 0)?;
         let mover = room[from];
-        if (mover - b'A') as usize == room_idx && room[1] == mover {
-            // In the right room, have no visitors. No reason to move.
+        if (mover - b'A') as usize == room_idx && (room[N - 1] == mover || room_to_room) {
+            // In the right room, have no visitors or we're planning to go directly to
+            //  our destination, which we're in. No reason to move.
             None
         } else {
             let steps = from + 1;
@@ -51,19 +57,18 @@ impl RoomState {
         }
     }
 
-    fn entrance_to_room(&self, mover: Amphipod) -> Option<(Steps, RoomState)> {
+    fn entrance_to_room(&self, mover: Amphipod) -> Option<(Steps, RoomState<N>)> {
         let room_idx = (mover - b'A') as usize;
         let room = self.rooms[room_idx];
-        if room[0] == 0 && room[1] == 0 {
-            let mut newstate = self.clone();
-            newstate.rooms[room_idx][1] = mover;
-            Some((2, newstate))
-        } else if room[0] == 0 && room[1] == mover {
-            let mut newstate = self.clone();
-            newstate.rooms[room_idx][0] = mover;
-            Some((1, newstate))
-        } else {
+        let tgt = N - 1 - room.iter().rev().position(|&x| x == 0)?;
+        assert_eq!(room[tgt], 0);
+        if room.iter().any(|&x| x != 0 && x != mover) {
+            // Visitors in the room.
             None
+        } else {
+            let mut newstate = self.clone();
+            newstate.rooms[room_idx][tgt] = mover;
+            Some((tgt + 1, newstate))
         }
     }
 
@@ -103,23 +108,24 @@ impl RoomState {
         }
     }
 
-    fn room_to_hall(&self, room: usize, hall: usize) -> Option<(Steps, Amphipod, RoomState)> {
+    fn room_to_hall(&self, room: usize, hall: usize) -> Option<(Steps, Amphipod, RoomState<N>)> {
         assert!(hall < 7);
         assert!(room < 4);
-        self.room_to_entrance(room)
+        self.room_to_entrance(room, false)
             .and_then(|(steps_out, mover, mut newstate)| {
                 if (mover - b'A') as usize == room {
                     // We must be expelling a visitor. If that's the case,
                     // we cannot move to block the visitor we're expelling
                     // from getting home.
-                    let visitor = newstate.rooms[room][1];
-                    assert_ne!(visitor, 0);
-                    assert_ne!(visitor, mover);
-                    if visitor < mover && hall <= room + 1 {
-                        return None;
-                    } else if visitor > mover && hall >= room + 2 {
-                        return None;
-                    }
+                    // let visitor = newstate.rooms[room][1];
+                    // assert_ne!(visitor, 0);
+                    // assert_ne!(visitor, mover);
+                    // if visitor < mover && hall <= room + 1 {
+                    //     return None;
+                    // } else if visitor > mover && hall >= room + 2 {
+                    //     return None;
+                    // }
+                    // Actually we can, if we want to kick them out and go straight home.
                 }
                 newstate
                     ._entrance_to_hall_steps(room, hall)
@@ -130,7 +136,7 @@ impl RoomState {
             })
     }
 
-    fn hall_to_room(&self, hall: usize) -> Option<(Steps, Amphipod, RoomState)> {
+    fn hall_to_room(&self, hall: usize) -> Option<(Steps, Amphipod, RoomState<N>)> {
         assert!(hall < 7);
         let mover = self.hall[hall];
         assert!(mover > 0);
@@ -159,12 +165,11 @@ impl RoomState {
         }
     }
 
-    fn room_to_room(&self, room1: usize) -> Option<(Cost, Amphipod, RoomState)> {
+    fn room_to_room(&self, room1: usize) -> Option<(Cost, Amphipod, RoomState<N>)> {
         assert!(room1 < 4);
-        self.room_to_entrance(room1)
+        self.room_to_entrance(room1, true)
             .and_then(|(steps_out, mover, newstate)| {
-                newstate
-                    ._entrance_to_entrance_steps(room1, mover)
+                self._entrance_to_entrance_steps(room1, mover)
                     .and_then(|steps_across| {
                         newstate
                             .entrance_to_room(mover)
@@ -177,12 +182,12 @@ impl RoomState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct State {
+struct State<const N: usize> {
     cost: usize,
-    state: RoomState,
+    state: RoomState<N>,
 }
 
-impl Ord for State {
+impl<const N: usize> Ord for State<N> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         other
             .cost
@@ -191,21 +196,25 @@ impl Ord for State {
     }
 }
 
-impl PartialOrd for State {
+impl<const N: usize> PartialOrd for State<N> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-fn shortest_path_cost(input: RoomState, goal: RoomState) -> Result<usize, String> {
-    let mut dist: HashMap<RoomState, usize> = HashMap::new();
-    let mut heap: BinaryHeap<State> = BinaryHeap::new();
+fn shortest_path_cost<const N: usize>(
+    input: RoomState<N>,
+    goal: RoomState<N>,
+) -> Result<usize, String> {
+    let mut dist: HashMap<RoomState<N>, usize> = HashMap::new();
+    let mut heap: BinaryHeap<State<N>> = BinaryHeap::new();
     heap.push(State {
         cost: 0,
         state: input,
     });
 
     'optloop: while let Some(State { cost, state }) = heap.pop() {
+        // println!("{:?}", State { cost, state });
         if state == goal {
             return Ok(cost);
         }
@@ -280,11 +289,26 @@ fn shortest_path_cost(input: RoomState, goal: RoomState) -> Result<usize, String
 // ###D#C#A#B###
 //   #D#C#B#A#
 //   #########
-const INPUT: RoomState = new_state([[b'D', b'D'], [b'C', b'C'], [b'A', b'B'], [b'B', b'A']]);
+const INPUT_1: RoomState<2> = new_state([[b'D', b'D'], [b'C', b'C'], [b'A', b'B'], [b'B', b'A']]);
+
+// PART2 INPUT:
+// #############
+// #...........#
+// ###D#C#A#B###
+//   #D#C#B#A#
+//   #D#B#A#C#
+//   #D#C#B#A#
+//   #########
+const INPUT_2: RoomState<4> = new_state([
+    [b'D', b'D', b'D', b'D'],
+    [b'C', b'C', b'B', b'C'],
+    [b'A', b'B', b'A', b'B'],
+    [b'B', b'A', b'C', b'A'],
+]);
 
 fn main() {
-    let input = INPUT;
-    println!("Part 1: {}", shortest_path_cost(input, GOAL).unwrap());
+    println!("Part 1: {}", shortest_path_cost(INPUT_1, GOAL_1).unwrap());
+    println!("Part 2: {}", shortest_path_cost(INPUT_2, GOAL_2).unwrap());
 }
 
 #[cfg(test)]
@@ -293,22 +317,22 @@ mod tests {
 
     #[test]
     fn test_shortest_path_cost_0() {
-        const INPUT: RoomState = new_state([[0, 0], [0, 0], [0, 0], [0, b'A']]);
-        const GOAL: RoomState = new_state([[0, b'A'], [0, 0], [0, 0], [0, 0]]);
+        const INPUT: RoomState<2> = new_state([[0, 0], [0, 0], [0, 0], [0, b'A']]);
+        const GOAL: RoomState<2> = new_state([[0, b'A'], [0, 0], [0, 0], [0, 0]]);
         assert_eq!(shortest_path_cost(INPUT, GOAL).unwrap(), 10);
     }
 
     #[test]
     fn test_shortest_path_cost_1() {
-        const INPUT: RoomState = new_state([[0, b'A'], [0, 0], [0, 0], [0, b'A']]);
-        const GOAL: RoomState = new_state([[b'A', b'A'], [0, 0], [0, 0], [0, 0]]);
+        const INPUT: RoomState<2> = new_state([[0, b'A'], [0, 0], [0, 0], [0, b'A']]);
+        const GOAL: RoomState<2> = new_state([[b'A', b'A'], [0, 0], [0, 0], [0, 0]]);
         assert_eq!(shortest_path_cost(INPUT, GOAL).unwrap(), 9);
     }
 
     #[test]
     fn test_visitor_expel() {
-        const INPUT: RoomState = new_state([[0, b'A'], [0, 0], [0, 0], [b'D', b'A']]);
-        const GOAL: RoomState = new_state([[b'A', b'A'], [0, 0], [0, 0], [0, b'D']]);
+        const INPUT: RoomState<2> = new_state([[0, b'A'], [0, 0], [0, 0], [b'D', b'A']]);
+        const GOAL: RoomState<2> = new_state([[b'A', b'A'], [0, 0], [0, 0], [0, b'D']]);
         assert_eq!(
             shortest_path_cost(INPUT, GOAL).unwrap(),
             9 + 5 * cost_per_step(b'D')
@@ -317,8 +341,8 @@ mod tests {
 
     #[test]
     fn test_visitor_expel2() {
-        const INPUT: RoomState = new_state([[0, 0], [0, 0], [0, 0], [b'D', b'A']]);
-        const GOAL: RoomState = new_state([[0, b'A'], [0, 0], [0, 0], [0, b'D']]);
+        const INPUT: RoomState<2> = new_state([[0, 0], [0, 0], [0, 0], [b'D', b'A']]);
+        const GOAL: RoomState<2> = new_state([[0, b'A'], [0, 0], [0, 0], [0, b'D']]);
         assert_eq!(
             shortest_path_cost(INPUT, GOAL).unwrap(),
             10 + 5 * cost_per_step(b'D')
@@ -327,21 +351,21 @@ mod tests {
 
     #[test]
     fn test_hall_to_room_1() {
-        const INPUT: RoomState = RoomState {
+        const INPUT: RoomState<2> = RoomState {
             rooms: [[0, 0], [0, 0], [0, 0], [0, b'D']],
             hall: [0, 0, 0, 0, 0, b'D', 0],
         };
-        const GOAL: RoomState = new_state([[0, 0], [0, 0], [0, 0], [b'D', b'D']]);
+        const GOAL: RoomState<2> = new_state([[0, 0], [0, 0], [0, 0], [b'D', b'D']]);
         assert_eq!(INPUT.hall_to_room(5).unwrap(), (2, b'D', GOAL));
     }
 
     #[test]
     fn test_shortest_path_hall_to_room_1() {
-        const INPUT: RoomState = RoomState {
+        const INPUT: RoomState<2> = RoomState {
             rooms: [[0, 0], [0, 0], [0, 0], [0, b'D']],
             hall: [0, 0, 0, 0, 0, b'D', 0],
         };
-        const GOAL: RoomState = new_state([[0, 0], [0, 0], [0, 0], [b'D', b'D']]);
+        const GOAL: RoomState<2> = new_state([[0, 0], [0, 0], [0, 0], [b'D', b'D']]);
         assert_eq!(
             shortest_path_cost(INPUT, GOAL).unwrap(),
             2 * cost_per_step(b'D')
@@ -350,21 +374,21 @@ mod tests {
 
     #[test]
     fn test_hall_to_room_2() {
-        const INPUT: RoomState = RoomState {
+        const INPUT: RoomState<2> = RoomState {
             rooms: [[0, 0], [0, 0], [0, 0], [0, 0]],
             hall: [0, 0, 0, 0, 0, b'D', 0],
         };
-        const GOAL: RoomState = new_state([[0, 0], [0, 0], [0, 0], [0, b'D']]);
+        const GOAL: RoomState<2> = new_state([[0, 0], [0, 0], [0, 0], [0, b'D']]);
         assert_eq!(INPUT.hall_to_room(5).unwrap(), (3, b'D', GOAL));
     }
 
     #[test]
     fn test_shortest_path_hall_to_room_2() {
-        const INPUT: RoomState = RoomState {
+        const INPUT: RoomState<2> = RoomState {
             rooms: [[0, 0], [0, 0], [0, 0], [0, 0]],
             hall: [0, 0, 0, 0, 0, b'D', 0],
         };
-        const GOAL: RoomState = new_state([[0, 0], [0, 0], [0, 0], [0, b'D']]);
+        const GOAL: RoomState<2> = new_state([[0, 0], [0, 0], [0, 0], [0, b'D']]);
         assert_eq!(
             shortest_path_cost(INPUT, GOAL).unwrap(),
             3 * cost_per_step(b'D')
@@ -373,7 +397,7 @@ mod tests {
 
     #[test]
     fn test_entrance_to_hall_steps() {
-        const INPUT: RoomState = RoomState {
+        const INPUT: RoomState<2> = RoomState {
             rooms: [[0, 0], [0, 0], [0, 0], [0, 0]],
             hall: [0, 0, 0, 0, 0, 0, 0],
         };
@@ -408,6 +432,27 @@ mod tests {
     }
 
     #[test]
+    fn test_room_to_room_null_move() {
+        const INPUT0: RoomState<2> = RoomState {
+            rooms: [[0, b'A'], [0, b'B'], [0, b'C'], [0, b'D']],
+            hall: [0, 0, 0, 0, 0, 0, 0],
+        };
+        assert_eq!(INPUT0.room_to_room(0), None);
+        assert_eq!(INPUT0.room_to_room(1), None);
+        assert_eq!(INPUT0.room_to_room(2), None);
+        assert_eq!(INPUT0.room_to_room(3), None);
+
+        const INPUT1: RoomState<2> = RoomState {
+            rooms: [[b'A'; 2], [b'B'; 2], [b'C'; 2], [b'D'; 2]],
+            hall: [0, 0, 0, 0, 0, 0, 0],
+        };
+        assert_eq!(INPUT1.room_to_room(0), None);
+        assert_eq!(INPUT1.room_to_room(1), None);
+        assert_eq!(INPUT1.room_to_room(2), None);
+        assert_eq!(INPUT1.room_to_room(3), None);
+    }
+
+    #[test]
     fn test_example_input() {
         // EXAMPLE INPUT:
         // #############
@@ -415,8 +460,89 @@ mod tests {
         // ###B#C#B#D###
         //   #A#D#C#A#
         //   #########
-        const EXAMPLE_INPUT: RoomState =
+        const EXAMPLE_INPUT: RoomState<2> =
             new_state([[b'B', b'A'], [b'C', b'D'], [b'B', b'C'], [b'D', b'A']]);
-        assert_eq!(shortest_path_cost(EXAMPLE_INPUT, GOAL).unwrap(), 12521);
+        assert_eq!(shortest_path_cost(EXAMPLE_INPUT, GOAL_1).unwrap(), 12521);
+    }
+
+    #[test]
+    fn test_example_paredown1() {
+        // EXAMPLE INPUT:
+        // #############
+        // #...........#
+        // ###B#C#B#.###
+        //   #A#D#C#A#
+        //   #########
+        const EXAMPLE_INPUT: RoomState<2> =
+            new_state([[b'B', b'A'], [b'C', b'D'], [b'B', b'C'], [0, b'A']]);
+
+        const GOAL_1: RoomState<2> = new_state([[b'A'; 2], [b'B'; 2], [b'C'; 2], [0, b'D']]);
+        assert_eq!(shortest_path_cost(EXAMPLE_INPUT, GOAL_1).unwrap(), 8521);
+    }
+
+    #[test]
+    fn test_part2_example_input() {
+        // EXAMPLE INPUT:
+        // #############
+        // #...........#
+        // ###B#C#B#D###
+        //   #D#C#B#A#
+        //   #D#B#A#C#
+        //   #A#D#C#A#
+        //   #########
+        const EXAMPLE_INPUT: RoomState<4> = new_state([
+            [b'B', b'D', b'D', b'A'],
+            [b'C', b'C', b'B', b'D'],
+            [b'B', b'B', b'A', b'C'],
+            [b'D', b'A', b'C', b'A'],
+        ]);
+        assert_eq!(shortest_path_cost(EXAMPLE_INPUT, GOAL_2).unwrap(), 44169);
+    }
+
+    #[test]
+    fn test_part2_example_paredown1() {
+        // EXAMPLE INPUT:
+        // #############
+        // #...........#
+        // ###.#.#.#.###
+        //   #.#.#.#.#
+        //   #.#.#.#.#
+        //   #A#D#C#A#
+        //   #########
+        const EXAMPLE_INPUT: RoomState<4> = new_state([
+            [0, 0, 0, b'A'],
+            [0, 0, 0, b'D'],
+            [0, 0, 0, b'C'],
+            [0, 0, 0, b'A'],
+        ]);
+        const GOAL: RoomState<4> =
+            new_state([[0, 0, b'A', b'A'], [0; 4], [0, 0, 0, b'C'], [0, 0, 0, b'D']]);
+        assert_eq!(
+            shortest_path_cost(EXAMPLE_INPUT, GOAL).unwrap(),
+            13 * cost_per_step(b'A') + 12 * cost_per_step(b'D')
+        );
+    }
+
+    #[test]
+    fn test_part2_example_paredown2() {
+        // EXAMPLE INPUT:
+        // #############
+        // #...........#
+        // ###.#.#.#.###
+        //   #.#.#.#.#
+        //   #.#.#.#.#
+        //   #A#.#D#A#
+        //   #########
+        const EXAMPLE_INPUT: RoomState<4> = new_state([
+            [0, 0, 0, b'A'],
+            [0, 0, 0, 0],
+            [0, 0, 0, b'D'],
+            [0, 0, 0, b'A'],
+        ]);
+        const GOAL: RoomState<4> = new_state([[0, 0, b'A', b'A'], [0; 4], [0; 4], [0, 0, 0, b'D']]);
+        assert_eq!(
+            shortest_path_cost(EXAMPLE_INPUT, GOAL).unwrap(),
+            13 * cost_per_step(b'A') + 10 * cost_per_step(b'D')
+        );
     }
 }

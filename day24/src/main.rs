@@ -193,10 +193,32 @@ fn part1(params: [[i8; 3]; CHUNK_COUNT]) -> String {
 
 // 99299513899971 correct
 
+fn part2(params: [[i8; 3]; CHUNK_COUNT]) -> Aluwidth {
+    let mut z_values: HashMap<Aluwidth, Aluwidth> = [(0, 0)].into_iter().collect();
+    let mut next_z_values: HashMap<Aluwidth, Aluwidth> = HashMap::new();
+
+    for index in 0..CHUNK_COUNT {
+        println!("Chunk {}: {} inputs", index, z_values.len());
+        for (z_in, candidate_prev) in z_values.drain() {
+            for digit in 1..=9 {
+                let z = chunk_v2(params[index], digit, z_in);
+                let candidate = candidate_prev * 10 + digit as isize;
+                next_z_values
+                    .entry(z)
+                    .and_modify(|c| *c = std::cmp::min(*c, candidate))
+                    .or_insert(candidate);
+            }
+        }
+        z_values = std::mem::take(&mut next_z_values);
+    }
+    return z_values[&0];
+}
+
 fn main() {
     const INPUT: &str = include_str!("../input.txt");
     let params = parse_paramlist(INPUT.lines().by_ref()).expect("Failed to parse input.");
-    println!("Part 1: {}", _part1_forward(params));
+    // println!("Part 1: {}", _part1_forward(params));
+    println!("Part 2: {}", part2(params));
 }
 
 #[cfg(test)]
